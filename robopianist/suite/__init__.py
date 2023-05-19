@@ -55,7 +55,7 @@ def load(
     shift: int = 0,
     recompile_physics: bool = False,
     legacy_step: bool = True,
-    task_kwargs: Optional[Dict[str, Any]] = None,
+    **task_kwargs,
 ) -> composer.Environment:
     """Loads a RoboPianist environment.
 
