@@ -101,6 +101,7 @@ class PianoWithShadowHands(base.PianoTask):
         self._disable_fingering_reward = (
             disable_fingering_reward or not self._midi.has_fingering()
         )
+        assert not self._disable_fingering_reward, "Don't have fingering reward!"
         self._disable_forearm_reward = disable_forearm_reward
         self._wrong_press_termination = wrong_press_termination
         self._disable_colorization = disable_colorization
@@ -315,7 +316,8 @@ class PianoWithShadowHands(base.PianoTask):
             margin=(_FINGER_CLOSE_ENOUGH_TO_KEY * 10),
             sigmoid="gaussian",
         )
-        return float(np.mean(rews))
+        rew = float(np.mean(rews))
+        return rew
 
     def _update_goal_state(self) -> None:
         # Observable callables get called after `after_step` but before
@@ -378,7 +380,7 @@ class PianoWithShadowHands(base.PianoTask):
         def _get_goal_state(physics) -> np.ndarray:
             del physics  # Unused.
             self._update_goal_state()
-            return self._goal_state.ravel()
+            return self._goal_state
 
         goal_observable = observable.Generic(_get_goal_state)
         goal_observable.enabled = True
