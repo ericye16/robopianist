@@ -45,7 +45,8 @@ _FINGERTIP_ALPHA = 1.0
 class PianoWithShadowHands(base.PianoTask):
     def __init__(
         self,
-        midi: midi_file.MidiFile,
+        midi: midi_file.MidiFile = None,
+        replay_keys = None,
         n_steps_lookahead: int = 1,
         n_seconds_lookahead: Optional[float] = None,
         trim_silence: bool = False,
@@ -91,6 +92,7 @@ class PianoWithShadowHands(base.PianoTask):
 
         self._midi = midi
         self._initial_midi = midi
+        self._replay_keys = replay_keys
         self._n_steps_lookahead = n_steps_lookahead
         if n_seconds_lookahead is not None:
             self._n_steps_lookahead = int(
@@ -98,7 +100,7 @@ class PianoWithShadowHands(base.PianoTask):
             )
         self._trim_silence = trim_silence
         self._initial_buffer_time = initial_buffer_time
-        self._disable_fingering_reward = (
+        self._disable_fingering_reward = (midi is None or 
             disable_fingering_reward or not self._midi.has_fingering()
         )
         self._disable_forearm_reward = disable_forearm_reward
@@ -116,6 +118,7 @@ class PianoWithShadowHands(base.PianoTask):
         self._reset_trajectory()  # Important: call before adding observables.
         self._add_observables()
         self._set_rewards()
+        self._actual_keys_played = []
 
     def _set_rewards(self) -> None:
         self._reward_fn = composite_reward.CompositeReward(
@@ -142,14 +145,18 @@ class PianoWithShadowHands(base.PianoTask):
             self._reset_trajectory()
 
     def _reset_trajectory(self) -> None:
-        note_traj = midi_file.NoteTrajectory.from_midi(
-            self._midi, self.control_timestep
-        )
-        if self._trim_silence:
-            note_traj.trim_silence()
-        note_traj.add_initial_buffer_time(self._initial_buffer_time)
-        self._notes = note_traj.notes
-        self._sustains = note_traj.sustains
+        if self._midi:
+            note_traj = midi_file.NoteTrajectory.from_midi(
+                self._midi, self.control_timestep
+            )
+            if self._trim_silence:
+                note_traj.trim_silence()
+            note_traj.add_initial_buffer_time(self._initial_buffer_time)
+            self._notes = note_traj.notes
+            self._sustains = note_traj.sustains
+        else:
+            assert self._replay_keys
+            self._notes, self._sustains = midi_file.NoteTrajectory.keys_to_keys(self._replay_keys)
 
     # Composer methods.
 
@@ -188,6 +195,7 @@ class PianoWithShadowHands(base.PianoTask):
                 self._colorize_keys(physics)
 
         should_not_be_pressed = np.flatnonzero(1 - self._goal_current[:-1])
+        self._actual_keys_played.append(self.piano.activation.copy())
         self._failure_termination = self.piano.activation[should_not_be_pressed].any()
 
     def get_reward(self, physics: mjcf.Physics) -> float:
@@ -205,6 +213,10 @@ class PianoWithShadowHands(base.PianoTask):
             self._discount = 0.0
             return True
         return False
+    
+    @property
+    def actual_keys_played(self):
+        return self._actual_keys_played
 
     @property
     def task_observables(self):

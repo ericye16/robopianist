@@ -50,6 +50,7 @@ _ALL_DICT: Dict[str, Union[Path, str]] = {
 def load(
     environment_name: str,
     midi_file: Optional[Path] = None,
+    replay_keys = None,
     seed: Optional[int] = None,
     stretch: float = 1.0,
     shift: int = 0,
@@ -72,20 +73,24 @@ def load(
         legacy_step: Whether to use the legacy step function.
         task_kwargs: Additional keyword arguments to pass to the task.
     """
-    if midi_file is not None:
-        midi = music.load(midi_file, stretch=stretch, shift=shift)
-    else:
-        if environment_name not in ALL:
-            raise ValueError(
-                f"Unknown environment {environment_name}. "
-                f"Available environments: {ALL}"
-            )
-        midi = music.load(_ALL_DICT[environment_name], stretch=stretch, shift=shift)
-
     task_kwargs = task_kwargs or {}
+    if not replay_keys:
+        if midi_file is not None:
+            midi = music.load(midi_file, stretch=stretch, shift=shift)
+        else:
+            if environment_name not in ALL:
+                raise ValueError(
+                    f"Unknown environment {environment_name}. "
+                    f"Available environments: {ALL}"
+                )
+            midi = music.load(_ALL_DICT[environment_name], stretch=stretch, shift=shift)
+        task_kwargs["midi"] = midi
+
+    if replay_keys:
+        task_kwargs["replay_keys"] = replay_keys
 
     return composer_utils.Environment(
-        task=piano_with_shadow_hands.PianoWithShadowHands(midi=midi, **task_kwargs),
+        task=piano_with_shadow_hands.PianoWithShadowHands(**task_kwargs),
         random_state=seed,
         strip_singleton_obs_buffer_dim=True,
         recompile_physics=recompile_physics,
