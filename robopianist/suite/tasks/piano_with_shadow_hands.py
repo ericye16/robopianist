@@ -100,8 +100,8 @@ class PianoWithShadowHands(base.PianoTask):
             )
         self._trim_silence = trim_silence
         self._initial_buffer_time = initial_buffer_time
-        self._disable_fingering_reward = (midi is None or 
-            disable_fingering_reward or not self._midi.has_fingering()
+        self._disable_fingering_reward = (
+            disable_fingering_reward or (self._midi and not self._midi.has_fingering())
         )
         self._disable_forearm_reward = disable_forearm_reward
         self._wrong_press_termination = wrong_press_termination
@@ -118,7 +118,6 @@ class PianoWithShadowHands(base.PianoTask):
         self._reset_trajectory()  # Important: call before adding observables.
         self._add_observables()
         self._set_rewards()
-        self._actual_keys_played = []
 
     def _set_rewards(self) -> None:
         self._reward_fn = composite_reward.CompositeReward(
@@ -166,6 +165,8 @@ class PianoWithShadowHands(base.PianoTask):
         del physics  # Unused.
         self._maybe_change_midi(random_state)
         self._reset_quantities_at_episode_init()
+        self._actual_keys_played = []
+        self._actual_fingers_used = []
 
     def before_step(
         self,
@@ -195,7 +196,30 @@ class PianoWithShadowHands(base.PianoTask):
                 self._colorize_keys(physics)
 
         should_not_be_pressed = np.flatnonzero(1 - self._goal_current[:-1])
-        self._actual_keys_played.append(self.piano.activation.copy())
+        actual_activations = self.piano.activation.copy()
+        self._actual_keys_played.append(actual_activations)
+        fingers_used = {}
+        if np.any(actual_activations):
+            fingertip_positions = {}
+            for hand, finger_offset in zip([self._left_hand, self._right_hand], [5, 0]):
+                for finger in range(0, 5):
+                    fingertip_site = hand.fingertip_sites[finger]
+                    fingertip_pos = physics.bind(fingertip_site).xpos.copy()
+                    fingertip_positions[finger + finger_offset] = fingertip_pos
+            for key_played in np.flatnonzero(actual_activations):
+                key_geom = self.piano.keys[key_played].geom[0]
+                key_geom_pos = physics.bind(key_geom).xpos.copy()
+                key_geom_pos[-1] += 0.5 * physics.bind(key_geom).size[2]
+                key_geom_pos[0] += 0.35 * physics.bind(key_geom).size[0]
+                closest_dist = float('inf')
+                closest_finger = 0
+                for finger in fingertip_positions:
+                    dist = float(np.linalg.norm(fingertip_positions[finger] - key_geom_pos))
+                    if dist < closest_dist:
+                        closest_dist = dist
+                        closest_finger = finger
+                fingers_used[key_played] = closest_finger
+        self._actual_fingers_used.append(fingers_used)
         self._failure_termination = self.piano.activation[should_not_be_pressed].any()
 
     def get_reward(self, physics: mjcf.Physics) -> float:
@@ -217,6 +241,10 @@ class PianoWithShadowHands(base.PianoTask):
     @property
     def actual_keys_played(self):
         return self._actual_keys_played
+    
+    @property
+    def actual_fingers_used(self):
+        return self._actual_fingers_used
 
     @property
     def task_observables(self):
