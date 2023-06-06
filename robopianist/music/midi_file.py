@@ -314,9 +314,8 @@ class NoteTrajectory:
             fingers_used_at_this_timestep = fingers_used[timestep_i]
             sustain.append(keys_at_this_timestep[-1])
             notes_in_timestep: List[PianoNote] = []
-            for key in np.flatnonzero(keys_at_this_timestep):
-                if key != len(keys_at_this_timestep) - 1:
-                    notes_in_timestep.append(PianoNote.create(key + consts.MIN_MIDI_PITCH_PIANO, consts.MAX_VELOCITY, fingers_used_at_this_timestep[key]))
+            for key in np.flatnonzero(keys_at_this_timestep[:-1]):
+                notes_in_timestep.append(PianoNote.create(key + consts.MIN_MIDI_PITCH_PIANO, consts.MAX_VELOCITY, fingers_used_at_this_timestep[key]))
             notes.append(notes_in_timestep)
         return notes, sustain
 

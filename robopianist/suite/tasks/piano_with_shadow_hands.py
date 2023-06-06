@@ -58,6 +58,7 @@ class PianoWithShadowHands(base.PianoTask):
         disable_hand_collisions: bool = False,
         augmentations: Optional[Sequence[base_variation.Variation]] = None,
         energy_penalty_coef: float = _ENERGY_PENALTY_COEF,
+        print_fingers_used: bool = False,
         **kwargs,
     ) -> None:
         """Task constructor.
@@ -109,6 +110,7 @@ class PianoWithShadowHands(base.PianoTask):
         self._disable_hand_collisions = disable_hand_collisions
         self._augmentations = augmentations
         self._energy_penalty_coef = energy_penalty_coef
+        self._print_fingers_used = print_fingers_used
 
         if not disable_fingering_reward and not disable_colorization:
             self._colorize_fingertips()
@@ -218,6 +220,8 @@ class PianoWithShadowHands(base.PianoTask):
                     if dist < closest_dist:
                         closest_dist = dist
                         closest_finger = finger
+                if self._print_fingers_used:
+                    print(f"Used finger {closest_finger} for key {midi_file.key_number_to_note_name(key_played)}")
                 fingers_used[key_played] = closest_finger
         self._actual_fingers_used.append(fingers_used)
         self._failure_termination = self.piano.activation[should_not_be_pressed].any()
@@ -318,7 +322,7 @@ class PianoWithShadowHands(base.PianoTask):
                 margin=(_KEY_CLOSE_ENOUGH_TO_PRESSED * 10),
                 sigmoid="gaussian",
             )
-            rew += 0.5 * rews.mean()
+            rew += 5 * rews.mean()
         # If there are any false positives, the remaining 0.5 reward is lost.
         off = np.flatnonzero(1 - self._goal_current[:-1])
         rew += 0.5 * (1 - self.piano.activation[off].any())
