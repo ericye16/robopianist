@@ -146,7 +146,10 @@ class PianoWithShadowHands(base.PianoTask):
             self._reset_trajectory()
 
     def _reset_trajectory(self) -> None:
-        if self._midi:
+        if self._replay_keys:
+            self._notes, self._sustains = midi_file.NoteTrajectory.keys_to_keys(self._replay_keys)
+        else:
+            assert self._midi
             note_traj = midi_file.NoteTrajectory.from_midi(
                 self._midi, self.control_timestep
             )
@@ -155,9 +158,6 @@ class PianoWithShadowHands(base.PianoTask):
             note_traj.add_initial_buffer_time(self._initial_buffer_time)
             self._notes = note_traj.notes
             self._sustains = note_traj.sustains
-        else:
-            assert self._replay_keys
-            self._notes, self._sustains = midi_file.NoteTrajectory.keys_to_keys(self._replay_keys)
 
     # Composer methods.
 
@@ -168,6 +168,7 @@ class PianoWithShadowHands(base.PianoTask):
         self._maybe_change_midi(random_state)
         self._reset_quantities_at_episode_init()
         self._actual_keys_played = []
+        self._actual_sustain = []
         self._actual_fingers_used = []
 
     def before_step(
@@ -200,6 +201,7 @@ class PianoWithShadowHands(base.PianoTask):
         should_not_be_pressed = np.flatnonzero(1 - self._goal_current[:-1])
         actual_activations = self.piano.activation.copy()
         self._actual_keys_played.append(actual_activations)
+        self._actual_sustain.append(self.piano.sustain_activation.copy())
         fingers_used = {}
         if np.any(actual_activations):
             fingertip_positions = {}
@@ -245,6 +247,10 @@ class PianoWithShadowHands(base.PianoTask):
     @property
     def actual_keys_played(self):
         return self._actual_keys_played
+    
+    @property
+    def actual_sustain(self):
+        return self._actual_sustain
     
     @property
     def actual_fingers_used(self):
@@ -322,7 +328,7 @@ class PianoWithShadowHands(base.PianoTask):
                 margin=(_KEY_CLOSE_ENOUGH_TO_PRESSED * 10),
                 sigmoid="gaussian",
             )
-            rew += 5 * rews.mean()
+            rew += 0.5 * rews.mean()
         # If there are any false positives, the remaining 0.5 reward is lost.
         off = np.flatnonzero(1 - self._goal_current[:-1])
         rew += 0.5 * (1 - self.piano.activation[off].any())
