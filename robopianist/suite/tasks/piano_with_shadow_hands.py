@@ -443,6 +443,9 @@ class PianoWithShadowHands(base.PianoTask):
         fingering_observable = observable.Generic(_get_fingering_state)
         fingering_observable.enabled = not self._disable_fingering_reward
         self._task_observables["fingering"] = fingering_observable
+        is_relabelled_observable = observable.Generic(lambda unused_physics: np.array([self._replay_keys is not None], dtype=np.float32))
+        is_relabelled_observable.enabled = True
+        self._task_observables["is_relabel"] = is_relabelled_observable
 
     def _colorize_fingertips(self) -> None:
         """Colorize the fingertips of the hands."""
