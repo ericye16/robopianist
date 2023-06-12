@@ -341,12 +341,9 @@ class PianoWithShadowHands(base.PianoTask):
                 sigmoid="gaussian",
             )
             rew += 0.5 * rews.mean()
-            max_no_press_reward = rew
-        else:
-            max_no_press_reward = 0.5
         # If there are any false positives, the remaining 0.5 reward is lost.
         off = np.flatnonzero(1 - self._goal_current[:-1])
-        rew += min(max_no_press_reward, 0.5 * (1 - self.piano.activation[off].any()))
+        rew += 0.5 * (1 - self.piano.activation[off].any())
         self.piano.key_press_reward = rew
         return rew
 
