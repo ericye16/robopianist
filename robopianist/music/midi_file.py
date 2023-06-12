@@ -27,9 +27,9 @@ from pathlib import Path
 from typing import List, Tuple, Union
 
 import numpy as np
-from note_seq import NoteSequence, midi_io, midi_synth, music_pb2, sequences_lib
+from note_seq import NoteSequence
 from note_seq import constants as ns_constants
-
+from note_seq import midi_io, midi_synth, music_pb2, sequences_lib
 from robopianist import SF2_PATH
 from robopianist.music import audio
 from robopianist.music import constants as consts
@@ -314,8 +314,12 @@ class NoteTrajectory:
             fingers_used_at_this_timestep = fingers_used[timestep_i]
             sustain.append(actual_sustains[timestep_i])
             notes_in_timestep: List[PianoNote] = []
+            seen_keys = set()
             for key in np.flatnonzero(keys_at_this_timestep):
-                notes_in_timestep.append(PianoNote.create(key + consts.MIN_MIDI_PITCH_PIANO, consts.MAX_VELOCITY, fingers_used_at_this_timestep[key]))
+                finger = fingers_used_at_this_timestep[key]
+                if finger not in seen_keys:
+                    seen_keys.add(finger)
+                    notes_in_timestep.append(PianoNote.create(key + consts.MIN_MIDI_PITCH_PIANO, consts.MAX_VELOCITY, fingers_used_at_this_timestep[key]))
             notes.append(notes_in_timestep)
         return notes, sustain
 
