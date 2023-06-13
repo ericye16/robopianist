@@ -17,7 +17,6 @@
 from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
-import robopianist.models.hands.shadow_hand_constants as hand_consts
 from dm_control import mjcf
 from dm_control.composer import variation as base_variation
 from dm_control.composer.observation import observable
@@ -25,6 +24,8 @@ from dm_control.mjcf import commit_defaults
 from dm_control.utils.rewards import tolerance
 from dm_env import specs
 from mujoco_utils import collision_utils, spec_utils
+
+import robopianist.models.hands.shadow_hand_constants as hand_consts
 from robopianist.models.arenas import stage
 from robopianist.music import midi_file
 from robopianist.suite import composite_reward
