@@ -2,3 +2,6 @@
 	path = third_party/mujoco_menagerie
 	url = https://github.com/deepmind/mujoco_menagerie.git
 	branch = main
+[submodule "nanorl"]
+	path = nanorl
+	url = git@github.com:kevinzakka/nanorl.git

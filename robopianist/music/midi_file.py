@@ -303,6 +303,21 @@ class NoteTrajectory:
         """Constructs a NoteTrajectory from a MIDI file."""
         notes, sustains = NoteTrajectory.seq_to_trajectory(midi.seq, dt)
         return cls(dt=dt, notes=notes, sustains=sustains)
+    
+    @staticmethod
+    def keys_to_keys(keys_played) -> Tuple[List[List[PianoNote]], List[int]]:
+        keys_played, actual_sustains, fingers_used = keys_played
+        sustain: List[int] = []
+        notes: List[List[PianoNote]] = []
+        for timestep_i in range(len(keys_played)):
+            keys_at_this_timestep = keys_played[timestep_i]
+            fingers_used_at_this_timestep = fingers_used[timestep_i]
+            sustain.append(actual_sustains[timestep_i])
+            notes_in_timestep: List[PianoNote] = []
+            for key in np.flatnonzero(keys_at_this_timestep):
+                notes_in_timestep.append(PianoNote.create(key + consts.MIN_MIDI_PITCH_PIANO, consts.MAX_VELOCITY, fingers_used_at_this_timestep[key]))
+            notes.append(notes_in_timestep)
+        return notes, sustain
 
     @staticmethod
     def seq_to_trajectory(

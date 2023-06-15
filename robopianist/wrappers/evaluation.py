@@ -64,13 +64,27 @@ class MidiEvaluationWrapper(EnvironmentWrapper):
         self._sustain_recalls: Deque[float] = deque(maxlen=deque_size)
         self._sustain_f1s: Deque[float] = deque(maxlen=deque_size)
 
+        # Reward breakdown
+        self._key_press_rewards = []
+        self._sustain_rewards = []
+        self._energy_reward = []
+        self._fingering_reward = []
+        self._forearm_reward = []
+
     def step(self, action: np.ndarray) -> dm_env.TimeStep:
         timestep = self._environment.step(action)
 
-        key_activation = self._environment.task.piano.activation
+        piano = self._environment.task.piano
+        key_activation = piano.activation
         self._key_presses.append(key_activation.astype(np.float64))
-        sustain_activation = self._environment.task.piano.sustain_activation
+        sustain_activation = piano.sustain_activation
         self._sustain_presses.append(sustain_activation.astype(np.float64))
+
+        self._key_press_rewards.append(piano.key_press_reward)
+        self._sustain_rewards.append(piano.sustain_reward)
+        self._energy_reward.append(piano.energy_reward)
+        self._fingering_reward.append(piano.fingering_reward if piano.fingering_reward else 0.0)
+        self._forearm_reward.append(piano.forearm_reward if piano.forearm_reward else 0.0)
 
         if timestep.last():
             key_press_metrics = self._compute_key_press_metrics()
@@ -90,6 +104,11 @@ class MidiEvaluationWrapper(EnvironmentWrapper):
     def reset(self) -> dm_env.TimeStep:
         self._key_presses = []
         self._sustain_presses = []
+        self._key_press_rewards = []
+        self._sustain_rewards = []
+        self._energy_reward = []
+        self._fingering_reward = []
+        self._forearm_reward = []
         return self._environment.reset()
 
     def get_musical_metrics(self) -> Dict[str, float]:
@@ -107,6 +126,11 @@ class MidiEvaluationWrapper(EnvironmentWrapper):
             "sustain_precision": _mean(self._sustain_precisions),
             "sustain_recall": _mean(self._sustain_recalls),
             "sustain_f1": _mean(self._sustain_f1s),
+            "key_press_reward": sum(self._key_press_rewards),
+            "sustain_reward": sum(self._sustain_rewards),
+            "energy_reward": sum(self._energy_reward),
+            "fingering_reward": sum(self._fingering_reward),
+            "forearm_reward": sum(self._forearm_reward)
         }
 
     # Helper methods.

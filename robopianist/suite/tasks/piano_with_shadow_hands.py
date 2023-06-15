@@ -45,7 +45,8 @@ _FINGERTIP_ALPHA = 1.0
 class PianoWithShadowHands(base.PianoTask):
     def __init__(
         self,
-        midi: midi_file.MidiFile,
+        midi: midi_file.MidiFile = None,
+        replay_keys = None,
         n_steps_lookahead: int = 1,
         n_seconds_lookahead: Optional[float] = None,
         trim_silence: bool = False,
@@ -57,6 +58,8 @@ class PianoWithShadowHands(base.PianoTask):
         disable_hand_collisions: bool = False,
         augmentations: Optional[Sequence[base_variation.Variation]] = None,
         energy_penalty_coef: float = _ENERGY_PENALTY_COEF,
+        print_fingers_used: bool = False,
+        use_tiered_reward: bool = False,
         **kwargs,
     ) -> None:
         """Task constructor.
@@ -91,6 +94,7 @@ class PianoWithShadowHands(base.PianoTask):
 
         self._midi = midi
         self._initial_midi = midi
+        self._replay_keys = replay_keys
         self._n_steps_lookahead = n_steps_lookahead
         if n_seconds_lookahead is not None:
             self._n_steps_lookahead = int(
@@ -99,14 +103,18 @@ class PianoWithShadowHands(base.PianoTask):
         self._trim_silence = trim_silence
         self._initial_buffer_time = initial_buffer_time
         self._disable_fingering_reward = (
-            disable_fingering_reward or not self._midi.has_fingering()
+            disable_fingering_reward or (self._midi and not self._midi.has_fingering())
         )
+        assert not self._disable_fingering_reward
         self._disable_forearm_reward = disable_forearm_reward
         self._wrong_press_termination = wrong_press_termination
         self._disable_colorization = disable_colorization
         self._disable_hand_collisions = disable_hand_collisions
         self._augmentations = augmentations
         self._energy_penalty_coef = energy_penalty_coef
+        self._print_fingers_used = print_fingers_used
+
+        self._use_tiered_reward = use_tiered_reward
 
         if not disable_fingering_reward and not disable_colorization:
             self._colorize_fingertips()
@@ -118,7 +126,8 @@ class PianoWithShadowHands(base.PianoTask):
         self._set_rewards()
 
     def _set_rewards(self) -> None:
-        self._reward_fn = composite_reward.CompositeReward(
+        composite_reward_fn = composite_reward.TieredReward if self._use_tiered_reward else composite_reward.CompositeReward
+        self._reward_fn = composite_reward_fn(
             key_press_reward=self._compute_key_press_reward,
             sustain_reward=self._compute_sustain_reward,
             energy_reward=self._compute_energy_reward,
@@ -142,14 +151,18 @@ class PianoWithShadowHands(base.PianoTask):
             self._reset_trajectory()
 
     def _reset_trajectory(self) -> None:
-        note_traj = midi_file.NoteTrajectory.from_midi(
-            self._midi, self.control_timestep
-        )
-        if self._trim_silence:
-            note_traj.trim_silence()
-        note_traj.add_initial_buffer_time(self._initial_buffer_time)
-        self._notes = note_traj.notes
-        self._sustains = note_traj.sustains
+        if self._replay_keys:
+            self._notes, self._sustains = midi_file.NoteTrajectory.keys_to_keys(self._replay_keys)
+        else:
+            assert self._midi
+            note_traj = midi_file.NoteTrajectory.from_midi(
+                self._midi, self.control_timestep
+            )
+            if self._trim_silence:
+                note_traj.trim_silence()
+            note_traj.add_initial_buffer_time(self._initial_buffer_time)
+            self._notes = note_traj.notes
+            self._sustains = note_traj.sustains
 
     # Composer methods.
 
@@ -159,6 +172,9 @@ class PianoWithShadowHands(base.PianoTask):
         del physics  # Unused.
         self._maybe_change_midi(random_state)
         self._reset_quantities_at_episode_init()
+        self._actual_keys_played = []
+        self._actual_sustain = []
+        self._actual_fingers_used = []
 
     def before_step(
         self,
@@ -188,6 +204,33 @@ class PianoWithShadowHands(base.PianoTask):
                 self._colorize_keys(physics)
 
         should_not_be_pressed = np.flatnonzero(1 - self._goal_current[:-1])
+        actual_activations = self.piano.activation.copy()
+        self._actual_keys_played.append(actual_activations)
+        self._actual_sustain.append(self.piano.sustain_activation.copy())
+        fingers_used = {}
+        if np.any(actual_activations):
+            fingertip_positions = {}
+            for hand, finger_offset in zip([self._left_hand, self._right_hand], [5, 0]):
+                for finger in range(0, 5):
+                    fingertip_site = hand.fingertip_sites[finger]
+                    fingertip_pos = physics.bind(fingertip_site).xpos.copy()
+                    fingertip_positions[finger + finger_offset] = fingertip_pos
+            for key_played in np.flatnonzero(actual_activations):
+                key_geom = self.piano.keys[key_played].geom[0]
+                key_geom_pos = physics.bind(key_geom).xpos.copy()
+                key_geom_pos[-1] += 0.5 * physics.bind(key_geom).size[2]
+                key_geom_pos[0] += 0.35 * physics.bind(key_geom).size[0]
+                closest_dist = float('inf')
+                closest_finger = 0
+                for finger in fingertip_positions:
+                    dist = float(np.linalg.norm(fingertip_positions[finger] - key_geom_pos))
+                    if dist < closest_dist:
+                        closest_dist = dist
+                        closest_finger = finger
+                if self._print_fingers_used:
+                    print(f"Used finger {closest_finger} for key {midi_file.key_number_to_note_name(key_played)}")
+                fingers_used[key_played] = closest_finger
+        self._actual_fingers_used.append(fingers_used)
         self._failure_termination = self.piano.activation[should_not_be_pressed].any()
 
     def get_reward(self, physics: mjcf.Physics) -> float:
@@ -205,6 +248,18 @@ class PianoWithShadowHands(base.PianoTask):
             self._discount = 0.0
             return True
         return False
+    
+    @property
+    def actual_keys_played(self):
+        return self._actual_keys_played
+    
+    @property
+    def actual_sustain(self):
+        return self._actual_sustain
+    
+    @property
+    def actual_fingers_used(self):
+        return self._actual_fingers_used
 
     @property
     def task_observables(self):
@@ -242,25 +297,32 @@ class PianoWithShadowHands(base.PianoTask):
             [g.full_identifier for g in self.right_hand.root_body.geom],
             [g.full_identifier for g in self.left_hand.root_body.geom],
         ):
-            return 0.0
-        return 0.5
+            rew = 0.0
+        else:
+            rew = 0.5
+        self.piano.forearm_reward = rew
+        return rew
 
     def _compute_sustain_reward(self, physics: mjcf.Physics) -> float:
         """Reward for pressing the sustain pedal at the right time."""
         del physics  # Unused.
-        return tolerance(
+        rew = tolerance(
             self._goal_current[-1] - self.piano.sustain_activation[0],
             bounds=(0, _KEY_CLOSE_ENOUGH_TO_PRESSED),
             margin=(_KEY_CLOSE_ENOUGH_TO_PRESSED * 10),
             sigmoid="gaussian",
         )
+        self.piano.sustain_reward = rew
+        return rew
 
     def _compute_energy_reward(self, physics: mjcf.Physics) -> float:
         """Reward for minimizing energy."""
-        rew = 0.0
+        neg_rew = 0.0
         for hand in [self.right_hand, self.left_hand]:
             power = hand.observables.actuators_power(physics).copy()
-            rew -= self._energy_penalty_coef * np.sum(power)
+            neg_rew += self._energy_penalty_coef * np.sum(power)
+        rew = -neg_rew
+        self.piano.energy_reward = rew
         return rew
 
     def _compute_key_press_reward(self, physics: mjcf.Physics) -> float:
@@ -279,9 +341,13 @@ class PianoWithShadowHands(base.PianoTask):
                 sigmoid="gaussian",
             )
             rew += 0.5 * rews.mean()
+            max_no_press_reward = rew
+        else:
+            max_no_press_reward = 0.5
         # If there are any false positives, the remaining 0.5 reward is lost.
         off = np.flatnonzero(1 - self._goal_current[:-1])
-        rew += 0.5 * (1 - self.piano.activation[off].any())
+        rew += min(max_no_press_reward, 0.5 * (1 - self.piano.activation[off].any()))
+        self.piano.key_press_reward = rew
         return rew
 
     def _compute_fingering_reward(self, physics: mjcf.Physics) -> float:
@@ -307,15 +373,17 @@ class PianoWithShadowHands(base.PianoTask):
 
         # Case where there are no keys to press at this timestep.
         if not distances:
-            return 0.0
-
-        rews = tolerance(
-            np.hstack(distances),
-            bounds=(0, _FINGER_CLOSE_ENOUGH_TO_KEY),
-            margin=(_FINGER_CLOSE_ENOUGH_TO_KEY * 10),
-            sigmoid="gaussian",
-        )
-        return float(np.mean(rews))
+            rew = 0
+        else:
+            rews = tolerance(
+                np.hstack(distances),
+                bounds=(0, _FINGER_CLOSE_ENOUGH_TO_KEY),
+                margin=(_FINGER_CLOSE_ENOUGH_TO_KEY * 10),
+                sigmoid="gaussian",
+            )
+            rew = float(np.mean(rews))
+        self.piano.fingering_reward = rew
+        return rew
 
     def _update_goal_state(self) -> None:
         # Observable callables get called after `after_step` but before
@@ -393,6 +461,9 @@ class PianoWithShadowHands(base.PianoTask):
         fingering_observable = observable.Generic(_get_fingering_state)
         fingering_observable.enabled = not self._disable_fingering_reward
         self._task_observables["fingering"] = fingering_observable
+        is_relabelled_observable = observable.Generic(lambda unused_physics: np.array([self._replay_keys is not None], dtype=np.float32))
+        is_relabelled_observable.enabled = False
+        self._task_observables["is_relabel"] = is_relabelled_observable
 
     def _colorize_fingertips(self) -> None:
         """Colorize the fingertips of the hands."""
